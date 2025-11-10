@@ -411,7 +411,7 @@ class WordProcessor(BaseFileProcessor):
             # Use block characters that match the length of original text
             redacted_length = len(entity['text'])
             block_chars = '█' * min(redacted_length, 20)  # Limit to 20 chars max
-            redaction = f"🔒[{entity_type}:{block_chars}]"
+            redaction = f"[{entity_type}:{block_chars}]"
             redacted_text = redacted_text.replace(entity['text'], redaction)
         
         return redacted_text

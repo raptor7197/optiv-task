@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Any, Optional
 from datetime import datetime
 import io
+from functools import lru_cache
+import concurrent.futures
 
 import pypdfium2 as pdfium
 import PyPDF2
@@ -29,7 +31,7 @@ class PDFProcessor(BaseFileProcessor):
     Maintains basic document structure while focusing on functionality.
     """
     
-    def __init__(self, file_path: str = None):
+    def __init__(self, file_path: Optional[str] = None):
         if file_path:
             super().__init__(file_path)
 
@@ -38,6 +40,10 @@ class PDFProcessor(BaseFileProcessor):
         self.nlp = None
         self._initialize_spacy_layout()
         self.logger.info("PDF processor initialized with layout awareness")
+        
+        # Cache for expensive operations
+        self._page_text_cache = {}
+        self._redaction_cache = {}
     
     def extract_text(self) -> Dict[str, Any]:
         """
@@ -95,17 +101,14 @@ class PDFProcessor(BaseFileProcessor):
             self.nlp = spacy.blank("en")
 
             # Check if spacy_layout component is available
-            if hasattr(spacy_layout, 'add_to_pipe'):
-                spacy_layout.add_to_pipe(self.nlp)
-            else:
-                # Try the standard component registration
-                try:
-                    self.nlp.add_pipe("spacy_layout")
-                except Exception:
-                    # Fallback - layout processing will be disabled
-                    self.nlp = None
-                    self.logger.warning("spaCy layout component not available, using coordinate-based redaction")
-                    return
+            # Try the standard component registration
+            try:
+                self.nlp.add_pipe("spacy_layout")
+            except Exception:
+                # Fallback - layout processing will be disabled
+                self.nlp = None
+                self.logger.warning("spaCy layout component not available, using coordinate-based redaction")
+                return
 
             self.logger.info("spaCy layout pipeline initialized")
         except Exception as e:
@@ -199,6 +202,39 @@ class PDFProcessor(BaseFileProcessor):
             self.logger.error(f"Error processing PDF {file_path}: {str(e)}")
             raise
     
+    def _extract_page_data(self, pdf_doc, page_num: int) -> Tuple[str, List[Dict[str, Any]]]:
+        """
+        Extract text and coordinates for a single page.
+        """
+        page = pdf_doc[page_num]
+        page_text = page.get_textpage().get_text_range()
+        
+        # Extract character-level coordinates for layout awareness
+        text_page = page.get_textpage()
+        char_coords = []
+        for char_idx in range(len(page_text)):
+            try:
+                char_box = text_page.get_charbox(char_idx)
+                if char_box:
+                    char_coords.append({
+                        'char': page_text[char_idx],
+                        'x': float(char_box[0]),
+                        'y': float(char_box[1]),
+                        'width': float(char_box[2] - char_box[0]),
+                        'height': float(char_box[3] - char_box[1]),
+                        'page': page_num
+                    })
+            except:
+                pass
+        return page_text, char_coords
+
+    def _extract_page_text(self, pdf_doc, page_num: int) -> str:
+        """
+        Extract text for a single page.
+        """
+        page = pdf_doc[page_num]
+        return page.get_textpage().get_text_range()
+
     def _extract_text_with_layout(self, file_path: str) -> Dict[str, Any]:
         """
         Extract text from PDF with layout information using spaCy layout processing.
@@ -212,32 +248,60 @@ class PDFProcessor(BaseFileProcessor):
         try:
             # First extract text using pypdfium2
             pdf_doc = pdfium.PdfDocument(file_path)
+            page_count = len(pdf_doc)
             page_texts = []
             page_coords = []
 
-            for page_num in range(len(pdf_doc)):
-                page = pdf_doc[page_num]
-                page_text = page.get_textpage().get_text_range()
-                page_texts.append(page_text)
+            # Use parallel processing for multi-page documents
+            if page_count > 4:  # Only use parallel processing for larger documents
+                with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+                    # Submit tasks for each page
+                    future_to_page = {
+                        executor.submit(self._extract_page_data, pdf_doc, page_num): page_num 
+                        for page_num in range(page_count)
+                    }
+                    
+                    # Collect results
+                    page_results = {}
+                    for future in concurrent.futures.as_completed(future_to_page):
+                        page_num = future_to_page[future]
+                        try:
+                            page_text, char_coords = future.result()
+                            page_results[page_num] = (page_text, char_coords)
+                        except Exception as e:
+                            self.logger.error(f"Error processing page {page_num}: {str(e)}")
+                            page_results[page_num] = ("", [])
+                    
+                    # Unpack results in order
+                    for page_num in range(page_count):
+                        page_text, char_coords = page_results[page_num]
+                        page_texts.append(page_text)
+                        page_coords.append(char_coords)
+            else:
+                # For smaller documents, process sequentially
+                for page_num in range(page_count):
+                    page = pdf_doc[page_num]
+                    page_text = page.get_textpage().get_text_range()
+                    page_texts.append(page_text)
 
-                # Extract character-level coordinates for layout awareness
-                text_page = page.get_textpage()
-                char_coords = []
-                for char_idx in range(len(page_text)):
-                    try:
-                        char_box = text_page.get_text_box(char_idx, char_idx + 1)
-                        if char_box:
-                            char_coords.append({
-                                'char': page_text[char_idx],
-                                'x': float(char_box[0]),
-                                'y': float(char_box[1]),
-                                'width': float(char_box[2] - char_box[0]),
-                                'height': float(char_box[3] - char_box[1]),
-                                'page': page_num
-                            })
-                    except:
-                        pass
-                page_coords.append(char_coords)
+                    # Extract character-level coordinates for layout awareness
+                    text_page = page.get_textpage()
+                    char_coords = []
+                    for char_idx in range(len(page_text)):
+                        try:
+                            char_box = text_page.get_charbox(char_idx)
+                            if char_box:
+                                char_coords.append({
+                                    'char': page_text[char_idx],
+                                    'x': float(char_box[0]),
+                                    'y': float(char_box[1]),
+                                    'width': float(char_box[2] - char_box[0]),
+                                    'height': float(char_box[3] - char_box[1]),
+                                    'page': page_num
+                                })
+                        except:
+                            pass
+                    page_coords.append(char_coords)
 
             pdf_doc.close()
             full_text = "\n\n".join(page_texts)
@@ -272,12 +336,38 @@ class PDFProcessor(BaseFileProcessor):
         """
         try:
             pdf_doc = pdfium.PdfDocument(file_path)
+            page_count = len(pdf_doc)
             page_texts = []
 
-            for page_num in range(len(pdf_doc)):
-                page = pdf_doc[page_num]
-                page_text = page.get_textpage().get_text_range()
-                page_texts.append(page_text)
+            # Use parallel processing for multi-page documents
+            if page_count > 4:  # Only use parallel processing for larger documents
+                with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+                    # Submit tasks for each page
+                    future_to_page = {
+                        executor.submit(self._extract_page_text, pdf_doc, page_num): page_num 
+                        for page_num in range(page_count)
+                    }
+                    
+                    # Collect results in order
+                    page_results = {}
+                    for future in concurrent.futures.as_completed(future_to_page):
+                        page_num = future_to_page[future]
+                        try:
+                            page_text = future.result()
+                            page_results[page_num] = page_text
+                        except Exception as e:
+                            self.logger.error(f"Error extracting text from page {page_num}: {str(e)}")
+                            page_results[page_num] = ""
+                    
+                    # Unpack results in order
+                    for page_num in range(page_count):
+                        page_texts.append(page_results[page_num])
+            else:
+                # For smaller documents, process sequentially
+                for page_num in range(page_count):
+                    page = pdf_doc[page_num]
+                    page_text = page.get_textpage().get_text_range()
+                    page_texts.append(page_text)
 
             pdf_doc.close()
             full_text = "\n\n".join(page_texts)
@@ -352,20 +442,61 @@ class PDFProcessor(BaseFileProcessor):
 
                 page_coordinates = layout_data['page_coordinates']
                 page_texts = layout_data['page_texts']
+                page_count = len(pdf_reader.pages)
 
-                for page_num in range(len(pdf_reader.pages)):
-                    original_page = pdf_reader.pages[page_num]
-
-                    if page_num < len(page_coordinates) and page_coordinates[page_num]:
-                        # Create overlay with precise redaction boxes
-                        overlay_page = self._create_precise_redaction_overlay(
-                            original_page, page_texts[page_num],
-                            page_coordinates[page_num], pii_findings, page_num
-                        )
+                # Use parallel processing for multi-page documents
+                if page_count > 4:  # Only use parallel processing for larger documents
+                    from concurrent.futures import ThreadPoolExecutor, as_completed
+                    
+                    # Process pages in parallel
+                    overlay_pages = [None] * page_count
+                    with ThreadPoolExecutor(max_workers=4) as executor:
+                        # Submit tasks for pages that need overlay processing
+                        future_to_page = {}
+                        for page_num in range(page_count):
+                            original_page = pdf_reader.pages[page_num]
+                            if page_num < len(page_coordinates) and page_coordinates[page_num]:
+                                future = executor.submit(
+                                    self._create_precise_redaction_overlay,
+                                    original_page, page_texts[page_num],
+                                    page_coordinates[page_num], pii_findings, page_num
+                                )
+                                future_to_page[future] = page_num
+                        
+                        # Collect results
+                        for future in as_completed(future_to_page):
+                            page_num = future_to_page[future]
+                            try:
+                                overlay_page = future.result()
+                                overlay_pages[page_num] = overlay_page
+                            except Exception as e:
+                                self.logger.error(f"Error processing page {page_num}: {str(e)}")
+                                overlay_pages[page_num] = None
+                    
+                    # Merge overlay pages with original pages
+                    for page_num in range(page_count):
+                        original_page = pdf_reader.pages[page_num]
+                        overlay_page = overlay_pages[page_num]
+                        
                         if overlay_page:
                             original_page.merge_page(overlay_page)
+                        
+                        pdf_writer.add_page(original_page)
+                else:
+                    # For smaller documents, process sequentially
+                    for page_num in range(len(pdf_reader.pages)):
+                        original_page = pdf_reader.pages[page_num]
 
-                    pdf_writer.add_page(original_page)
+                        if page_num < len(page_coordinates) and page_coordinates[page_num]:
+                            # Create overlay with precise redaction boxes
+                            overlay_page = self._create_precise_redaction_overlay(
+                                original_page, page_texts[page_num],
+                                page_coordinates[page_num], pii_findings, page_num
+                            )
+                            if overlay_page:
+                                original_page.merge_page(overlay_page)
+
+                        pdf_writer.add_page(original_page)
 
                 # Save the redacted PDF
                 with open(output_path, 'wb') as output_file:
@@ -552,20 +683,53 @@ class PDFProcessor(BaseFileProcessor):
             # Create new PDF with ReportLab
             c = canvas.Canvas(str(output_path), pagesize=(page_width, page_height))
             
-            # Process each page
-            for page_num, page_text in enumerate(page_texts):
-                if page_num >= total_pages:
-                    break
+            # Use parallel processing for multi-page documents
+            page_count = min(len(page_texts), total_pages)
+            if page_count > 4:  # Only use parallel processing for larger documents
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+                
+                # Process pages in parallel to generate redacted text
+                redacted_texts = [None] * page_count
+                with ThreadPoolExecutor(max_workers=4) as executor:
+                    # Submit tasks for redacting each page
+                    future_to_page = {}
+                    for page_num, page_text in enumerate(page_texts):
+                        if page_num >= total_pages:
+                            break
+                        future = executor.submit(self._redact_page_text, page_text, pii_findings)
+                        future_to_page[future] = page_num
                     
-                # Create redacted text for this page
-                redacted_text = self._redact_page_text(page_text, pii_findings)
+                    # Collect results
+                    for future in as_completed(future_to_page):
+                        page_num = future_to_page[future]
+                        try:
+                            redacted_text = future.result()
+                            redacted_texts[page_num] = redacted_text
+                        except Exception as e:
+                            self.logger.error(f"Error redacting page {page_num}: {str(e)}")
+                            redacted_texts[page_num] = page_texts[page_num]  # Use original if redaction fails
                 
-                # Add text to the new PDF page
-                self._add_secure_text_to_page(c, redacted_text, page_width, page_height)
-                
-                # Finish the page
-                if page_num < len(page_texts) - 1:
-                    c.showPage()
+                # Add text to PDF pages sequentially (ReportLab is not thread-safe)
+                for page_num, redacted_text in enumerate(redacted_texts):
+                    if redacted_text is not None:
+                        self._add_secure_text_to_page(c, redacted_text, page_width, page_height)
+                        if page_num < len(redacted_texts) - 1:
+                            c.showPage()
+            else:
+                # For smaller documents, process sequentially
+                for page_num, page_text in enumerate(page_texts):
+                    if page_num >= total_pages:
+                        break
+                        
+                    # Create redacted text for this page
+                    redacted_text = self._redact_page_text(page_text, pii_findings)
+                    
+                    # Add text to the new PDF page
+                    self._add_secure_text_to_page(c, redacted_text, page_width, page_height)
+                    
+                    # Finish the page
+                    if page_num < len(page_texts) - 1:
+                        c.showPage()
             
             # Save the PDF
             c.save()
@@ -606,6 +770,49 @@ class PDFProcessor(BaseFileProcessor):
         except Exception as e:
             self.logger.warning(f"Could not validate redaction completeness: {str(e)}")
     
+    @lru_cache(maxsize=64)
+    def _wrap_text_cached(self, text: str, max_width: float, font_name: str, font_size: int) -> tuple:
+        """
+        Cached version of text wrapping.
+        Returns a tuple of (lines, line_heights) for efficiency.
+        """
+        # Create a temporary canvas for measuring text
+        from reportlab.pdfgen.canvas import Canvas
+        from reportlab.lib.pagesizes import letter
+        temp_canvas = Canvas("temp.pdf", pagesize=letter)
+        temp_canvas.setFont(font_name, font_size)
+        
+        # Split text into lines that fit the page width
+        lines = []
+        line_heights = []
+        for paragraph in text.split('\n'):
+            if not paragraph.strip():
+                lines.append('')
+                line_heights.append(font_size + 2)
+                continue
+                
+            # Word wrap for long lines
+            words = paragraph.split()
+            current_line = ''
+            
+            for word in words:
+                test_line = f"{current_line} {word}".strip()
+                text_width = temp_canvas.stringWidth(test_line, font_name, font_size)
+                
+                if text_width <= max_width:
+                    current_line = test_line
+                else:
+                    if current_line:
+                        lines.append(current_line)
+                        line_heights.append(font_size + 2)
+                    current_line = word
+            
+            if current_line:
+                lines.append(current_line)
+                line_heights.append(font_size + 2)
+        
+        return (tuple(lines), tuple(line_heights))
+    
     def _add_secure_text_to_page(
         self,
         canvas_obj: canvas.Canvas,
@@ -618,48 +825,27 @@ class PDFProcessor(BaseFileProcessor):
         """
         try:
             # Set up text formatting
-            canvas_obj.setFont("Helvetica", 11)
+            font_name = "Helvetica"
+            font_size = 11
+            canvas_obj.setFont(font_name, font_size)
             canvas_obj.setFillColor(colors.black)
             
             # Text positioning
             margin = 50
-            line_height = 14
             max_width = page_width - (2 * margin)
             
-            # Split text into lines that fit the page width
-            lines = []
-            for paragraph in text.split('\n'):
-                if not paragraph.strip():
-                    lines.append('')
-                    continue
-                    
-                # Word wrap for long lines
-                words = paragraph.split()
-                current_line = ''
-                
-                for word in words:
-                    test_line = f"{current_line} {word}".strip()
-                    text_width = canvas_obj.stringWidth(test_line, "Helvetica", 11)
-                    
-                    if text_width <= max_width:
-                        current_line = test_line
-                    else:
-                        if current_line:
-                            lines.append(current_line)
-                        current_line = word
-                
-                if current_line:
-                    lines.append(current_line)
+            # Use cached text wrapping
+            lines, line_heights = self._wrap_text_cached(text, max_width, font_name, font_size)
             
             # Draw text lines
             y_position = page_height - margin - 20
             
-            for line in lines:
+            for i, line in enumerate(lines):
                 if y_position < margin:
                     break  # Prevent text from going off page
-                    
+                
                 canvas_obj.drawString(margin, y_position, line)
-                y_position -= line_height
+                y_position -= line_heights[i] if i < len(line_heights) else (font_size + 2)
                 
         except Exception as e:
             self.logger.warning(f"Error adding text to page: {str(e)}")
@@ -780,7 +966,7 @@ class PDFProcessor(BaseFileProcessor):
             # Format entity type for display
             entity_type = entity['entity_type']
             display_type = entity_type.replace('_', ' ').title()
-            label = f"🔒 {display_type}"
+            label = f"[{display_type}]"
             
             # Center the label in the box
             text_width = canvas_obj.stringWidth(label, "Helvetica-Bold", 7)
@@ -798,11 +984,66 @@ class PDFProcessor(BaseFileProcessor):
             self.logger.warning(f"Could not add redaction box for entity: {str(e)}")
             # Fallback to simple black box
             try:
+                x_position = 50
+                y_position = page_height - 100
                 canvas_obj.setFillColor(colors.black)
                 canvas_obj.rect(x_position, y_position, 100, 12, fill=1)
             except:
                 pass
 
+    @lru_cache(maxsize=128)
+    def _redact_page_text_cached(self, page_text: str, entities_key: str) -> str:
+        """
+        Cached version of page text redaction.
+        """
+        import json
+        pii_entities = json.loads(entities_key)
+        
+        # Filter relevant entities for this page
+        relevant_entities = [
+            entity for entity in pii_entities 
+            if entity['text'] in page_text
+        ]
+        
+        if not relevant_entities:
+            return page_text
+        
+        # Sort entities by position (descending) to avoid offset issues
+        # Sort by start position in descending order
+        sorted_entities = sorted(
+            relevant_entities, 
+            key=lambda x: x.get('start', 0), 
+            reverse=True
+        )
+        
+        # Use list to build redacted text more efficiently
+        redacted_parts = []
+        last_end = len(page_text)
+        
+        for entity in sorted_entities:
+            start = entity.get('start', 0)
+            end = entity.get('end', len(entity['text']))
+            
+            # Add the unredacted part after this entity
+            redacted_parts.append(page_text[end:last_end])
+            
+            # Add the redacted part
+            entity_type = entity['entity_type'].replace('_', ' ').title()
+            # Use block characters that match the length of original text
+            redacted_length = end - start
+            block_chars = '█' * min(redacted_length, 20)  # Limit to 20 chars max
+            redaction = f"[{entity_type}:{block_chars}]"
+            redacted_parts.append(redaction)
+            
+            last_end = start
+        
+        # Add the beginning part of the text
+        redacted_parts.append(page_text[:last_end])
+        
+        # Reverse and join parts
+        redacted_parts.reverse()
+        return ''.join(redacted_parts)
+    
     def _redact_page_text(
         self, 
         page_text: str, 
@@ -818,24 +1059,12 @@ class PDFProcessor(BaseFileProcessor):
         Returns:
             Text with PII entities redacted
         """
-        redacted_text = page_text
+        # Create a cache key from the entities
+        import json
+        entities_key = json.dumps(pii_entities, sort_keys=True)
         
-        # Sort entities by position (descending) to avoid offset issues
-        relevant_entities = [
-            entity for entity in pii_entities 
-            if entity['text'] in page_text
-        ]
-        
-        for entity in relevant_entities:
-            # Create professional redaction using block characters
-            entity_type = entity['entity_type'].replace('_', ' ').title()
-            # Use block characters that match the length of original text
-            redacted_length = len(entity['text'])
-            block_chars = '█' * min(redacted_length, 20)  # Limit to 20 chars max
-            redaction = f"🔒[{entity_type}:{block_chars}]"
-            redacted_text = redacted_text.replace(entity['text'], redaction)
-        
-        return redacted_text
+        # Use cached version if available
+        return self._redact_page_text_cached(page_text, entities_key)
     
     def _add_text_to_page(
         self, 
