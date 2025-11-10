@@ -1,12 +1,58 @@
-# React + Vite
+# Frontend Documentation
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This folder contains the frontend code for the Optiv Task application. The frontend is built using modern web technologies to provide a responsive and interactive user interface.
 
-Currently, two official plugins are available:
+## Project Structure
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+frontend/
+├── public/          # Static assets and HTML template
+├── src/             # Source code for the application
+│   ├── components/  # Reusable UI components
+│   ├── pages/       # Page-level components
+│   ├── styles/      # CSS and styling files
+│   ├── utils/       # Utility functions and helpers
+│   └── App.js      # Main application component
+├── package.json    # Project dependencies and scripts
+└── README.md       # This file
 
-## Expanding the ESLint configuration
+## Getting Started
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+### Prerequisites
+- Node.js (version 14 or higher)
+- npm or yarn package manager
+
+### Installation
+1. Navigate to the frontend directory:
+   cd frontend
+
+2. Install dependencies:
+   npm install
+   # or
+   yarn install
+
+### Development
+To start the development server:
+npm run dev
+# or
+yarn dev
+
+The application will be available at `http://localhost:3000`.
+
+### Building for Production
+To create a production build:
+npm run build
+# or
+yarn build
+
+### Deployment
+The frontend can be deployed to various platforms including:
+- Vercel
+- Netlify
+- AWS S3 + CloudFront
+- Any static hosting service
+
+## Technologies Used
+- React.js
+- Tailwind CSS (if applicable)
+- Axios for API requests
+- React Router for navigation

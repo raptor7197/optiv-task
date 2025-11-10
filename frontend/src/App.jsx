@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
-import LayoutTextFlip from './components/ui/LayoutTextFlip.jsx'
+import { gsap } from 'gsap'
+import { GsapTextFlip } from './components/ui/GsapTextFlip.jsx'
 
 function App() {
   const [file, setFile] = useState(null)
@@ -12,6 +13,19 @@ function App() {
   const [showResults, setShowResults] = useState(false)
   const featuresRef = useRef(null)
   const badgesRef = useRef(null)
+  const appRef = useRef(null)
+
+  // Page load animation
+  useEffect(() => {
+    if (appRef.current) {
+      gsap.from(appRef.current, {
+        duration: 1,
+        opacity: 0,
+        y: 20,
+        ease: 'power2.out'
+      });
+    }
+  }, []);
 
   // Scroll animations
   useEffect(() => {
@@ -23,7 +37,12 @@ function App() {
     const observer = new IntersectionObserver((entries) => {
       entries.forEach((entry) => {
         if (entry.isIntersecting) {
-          entry.target.classList.add('animate-fade-in')
+          gsap.from(entry.target, {
+            duration: 0.8,
+            opacity: 0,
+            y: 30,
+            ease: 'power2.out'
+          });
         }
       })
     }, observerOptions)
@@ -160,7 +179,7 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black text-white">
+    <div ref={appRef} className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black text-white">
 
       {/* hero section starts here */}
       <section className="min-h-screen flex items-center justify-center px-4">
@@ -177,7 +196,7 @@ function App() {
           </p>
       {/* acertinity component is here  */}
           <div className="mt-6 text-3xl md:text-5xl font-extrabold">
-            <LayoutTextFlip
+            <GsapTextFlip
             />
           </div>
 
@@ -185,6 +204,22 @@ function App() {
             onClick={() => document.getElementById('upload-section').scrollIntoView({ behavior: 'smooth' })}
             className="bg-green-500 hover:bg-green-600 text-white font-bold py-4 mt-9 px-8 rounded-full transition-all duration-300 ease-in-out transform hover:scale-105 shadow-lg hover:shadow-xl hover:shadow-green-500/60 relative z-10"
             style={{ fontSize: '18px', fontWeight: '700' }}
+            onMouseEnter={(e) => {
+              gsap.to(e.currentTarget, {
+                duration: 0.3,
+                scale: 1.05,
+                boxShadow: '0 20px 25px -5px rgba(16, 185, 129, 0.4), 0 8px 10px -6px rgba(16, 185, 129, 0.2)',
+                ease: 'power2.out'
+              });
+            }}
+            onMouseLeave={(e) => {
+              gsap.to(e.currentTarget, {
+                duration: 0.3,
+                scale: 1,
+                boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1)',
+                ease: 'power2.out'
+              });
+            }}
           >
             Start Cleaning Files
           </button>
@@ -196,7 +231,7 @@ function App() {
           <h2 className="text-4xl font-bold text-center mb-12 text-white">Upload Your Document</h2>
 
           <div
-            className={`w-120 mx-auto p-8 rounded-3xl border border-white/15 backdrop-blur-xl transition-all duration-500 ease-cubic-bezier(0.25,0.1,0.25,1) ${
+            className={`w-120 mx-auto p-8 rounded-3xl border border-white/15 transition-all duration-500 ease-cubic-bezier(0.25,0.1,0.25,1) ${
               uploadState === 'uploading' ? 'scale-110' : 'scale-100'
             } ${dragActive ? 'border-green-500 bg-green-500/10 scale-110' : 'bg-white/5 hover:bg-white/10'}`}
             style={{ width: '480px', borderRadius: '20px' }}
@@ -204,6 +239,20 @@ function App() {
             onDragLeave={handleDrag}
             onDragOver={handleDrag}
             onDrop={handleDrop}
+            ref={(el) => {
+              if (el) {
+                gsap.from(el, {
+                  scrollTrigger: {
+                    trigger: el,
+                    start: 'top 80%'
+                  },
+                  duration: 0.8,
+                  opacity: 0,
+                  y: 30,
+                  ease: 'power2.out'
+                });
+              }
+            }}
           >
             {uploadState === 'idle' && (
               <>
@@ -215,7 +264,7 @@ function App() {
                   id="fileInput"
                 />
                 <label htmlFor="fileInput" className="cursor-pointer block text-center">
-                  <div className="text-6xl mb-6">📁</div>
+                  <div className="text-6xl mb-6"></div>
                   <h3 className="text-2xl font-semibold mb-4 text-white">Drop your file here</h3>
                   <p className="text-gray-300 mb-6">or click to browse</p>
                   <div className="text-sm text-gray-400">PDF, Word, Excel, Images</div>
@@ -225,7 +274,7 @@ function App() {
 
             {uploadState === 'uploading' && (
               <div className="text-center">
-                <div className="text-6xl mb-6 animate-pulse">⚡</div>
+                <div className="text-6xl mb-6 animate-pulse"></div>
                 <h3 className="text-2xl font-semibold mb-6 text-white">Processing your file...</h3>
                 <div className="w-full bg-gray-700 rounded-full h-4 mb-4">
                   <div
@@ -268,7 +317,7 @@ function App() {
 
             {uploadState === 'error' && (
               <div className="text-center">
-                <div className="text-6xl mb-6 text-red-500">❌</div>
+                <div className="text-6xl mb-6 text-red-500"></div>
                 <h3 className="text-2xl font-semibold mb-4 text-white">Processing Failed</h3>
                 <p className="text-red-300 mb-8">{error}</p>
                 <button
@@ -282,7 +331,7 @@ function App() {
           </div>
 
           {file && uploadState === 'idle' && (
-            <div className="mt-6 p-4 bg-white/10 rounded-xl backdrop-blur-sm border border-white/20" style={{ width: '480px', margin: '24px auto' }}>
+            <div className="mt-6 p-4 bg-white/10 rounded-xl border border-white/20" style={{ width: '480px', margin: '24px auto' }}>
               <div className="flex justify-between items-center mb-4">
                 <div>
                   <div className="text-white font-medium">{file.name}</div>
@@ -302,35 +351,48 @@ function App() {
 
 {/* results section starts herre */}
       {showResults && result && (
-        <section className="py-20 px-4">
+        <section className="py-20 px-4" ref={(el) => {
+          if (el) {
+            gsap.from(el, {
+              scrollTrigger: {
+                trigger: el,
+                start: 'top 80%'
+              },
+              duration: 0.8,
+              opacity: 0,
+              y: 30,
+              ease: 'power2.out'
+            });
+          }
+        }}>
           <div className="max-w-4xl mx-auto">
             <h2 className="text-4xl font-bold text-center mb-12 text-white">Processing Results</h2>
 
             {/* Stats Cards */}
             <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
-              <div className="bg-white/10 p-6 rounded-xl backdrop-blur-sm border border-white/20">
-                <div className="text-4xl mb-4">📄</div>
+              <div className="bg-white/10 p-6 rounded-xl border border-white/20">
+                <div className="text-4xl mb-4"></div>
                 <div className="text-gray-300 text-sm">File</div>
-                <div className="text-white w-autofont-semibold">{result.filename}</div>
+                <div className="text-white font-semibold">{result.filename}</div>
               </div>
 
               {result.confidence !== undefined && (
-                <div className="bg-white/10 p-6 rounded-xl backdrop-blur-sm border border-white/20">
-                  <div className="text-4xl mb-4">🎯</div>
+                <div className="bg-white/10 p-6 rounded-xl border border-white/20">
+                  <div className="text-4xl mb-4"></div>
                   <div className="text-gray-300 text-sm">Confidence</div>
                   <div className="text-white font-semibold">{result.confidence}%</div>
                 </div>
               )}
 
-              <div className="bg-white/10 p-6 rounded-xl backdrop-blur-sm border border-white/20">
-                <div className="text-4xl mb-4">📊</div>
+              <div className="bg-white/10 p-6 rounded-xl border border-white/20">
+                <div className="text-4xl mb-4"></div>
                 <div className="text-gray-300 text-sm">Type</div>
                 <div className="text-white font-semibold">{result.file_type}</div>
               </div>
 
               {(result.total_entities !== undefined || result.total_pii_count !== undefined) && (
-                <div className="bg-white/10 p-6 rounded-xl backdrop-blur-sm border border-white/20">
-                  <div className="text-4xl mb-4">🔍</div>
+                <div className="bg-white/10 p-6 rounded-xl border border-white/20">
+                  <div className="text-4xl mb-4"></div>
                   <div className="text-gray-300 text-sm">PII Found</div>
                   <div className="text-white font-semibold">
                     {result.total_entities || result.total_pii_count || 0} items
@@ -342,8 +404,8 @@ function App() {
             {/* PII Summary */}
             {((result.pii_summary && Object.keys(result.pii_summary).length > 0) ||
               (result.entity_types && Object.keys(result.entity_types).length > 0)) && (
-              <div className="bg-white/10 p-6 rounded-xl backdrop-blur-sm border border-white/20 mb-8">
-                <h3 className="text-2xl font-semibold mb-6 text-white">🔍 PII Detection Summary</h3>
+              <div className="bg-white/10 p-6 rounded-xl border border-white/20 mb-8">
+                <h3 className="text-2xl font-semibold mb-6 text-white">PII Detection Summary</h3>
                 <div className="flex flex-wrap gap-3 mb-6">
                   {/* Handle Excel format (pii_summary) */}
                   {result.pii_summary && Object.entries(result.pii_summary).map(([type, count]) => (
@@ -378,7 +440,7 @@ function App() {
 
             {/* exxtracted Text section  */}
             {result.extracted_text && (
-              <div className="bg-white/10 rounded-xl backdrop-blur-sm border border-white/20 overflow-hidden">
+              <div className="bg-white/10 rounded-xl border border-white/20 overflow-hidden">
                 <div className="p-6 border-b border-white/20 flex justify-between items-center">
                   <h3 className="text-2xl font-semibold text-white">Extracted Text</h3>
                   <div className="flex gap-3">
@@ -409,6 +471,20 @@ function App() {
       <section className="py-20 px-4" ref={featuresRef}>
         <div className="max-w-6xl mx-auto">
           <h2 className="text-4xl font-bold text-center mb-16 text-white">Why Choose Our Privacy Tool?</h2>
+          <div ref={(el) => {
+            if (el) {
+              gsap.from(el, {
+                scrollTrigger: {
+                  trigger: el,
+                  start: 'top 80%'
+                },
+                duration: 0.8,
+                opacity: 0,
+                y: 30,
+                ease: 'power2.out'
+              });
+            }
+          }}>
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
             {[
               {
@@ -430,13 +506,30 @@ function App() {
             ].map((feature, index) => (
               <div
                 key={index}
-                className="feature-card p-6 bg-white/5 rounded-xl backdrop-blur-sm border border-white/10 hover:border-white/20 transition-all duration-400 opacity-0 translate-y-5"
+                className="feature-card p-6 bg-white/5 rounded-xl border border-white/10 hover:border-white/20 transition-all duration-400 opacity-0 translate-y-5 group"
+                onMouseEnter={(e) => {
+                  gsap.to(e.currentTarget, {
+                    duration: 0.3,
+                    y: -5,
+                    boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.2)',
+                    ease: 'power2.out'
+                  });
+                }}
+                onMouseLeave={(e) => {
+                  gsap.to(e.currentTarget, {
+                    duration: 0.3,
+                    y: 0,
+                    boxShadow: 'none',
+                    ease: 'power2.out'
+                  });
+                }}
               >
                 <div className="text-4xl mb-4">{feature.icon}</div>
                 <h3 className="text-xl font-semibold mb-4 text-white">{feature.title}</h3>
                 <p className="text-gray-300 leading-relaxed">{feature.description}</p>
               </div>
             ))}
+          </div>
           </div>
         </div>
       </section>
@@ -452,7 +545,7 @@ function App() {
             ].map((badge, index) => (
               <div
                 key={index}
-                className="security-badge flex items-center space-x-3 px-6 py-3 bg-white/10 rounded-full backdrop-blur-sm border border-white/20 opacity-80 hover:opacity-100 transition-opacity duration-1000"
+                className="security-badge flex items-center space-x-3 px-6 py-3 bg-white/10 rounded-full border border-white/20 opacity-80 hover:opacity-100 transition-opacity duration-1000"
                 style={{ animation: 'glowPulse 2.5s ease-in-out infinite' }}
               >
                 <span className="text-2xl">{badge.icon}</span>
